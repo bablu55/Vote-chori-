@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Duplicate Voter Detector</title>
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121a33; --muted:#9fb0ff; --text:#e8edff; --accent:#6ea8fe; --ok:#33d17a; --warn:#ffd056; --bad:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    body{margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial; background:linear-gradient(180deg,#0b1020,#0f1430 60%,#0b1020); color:var(--text);}
+    header{position:sticky; top:0; z-index:10; backdrop-filter: blur(6px); background:rgba(11,16,32,.6); border-bottom:1px solid rgba(255,255,255,.06)}
+    .wrap{max-width:1100px; margin:0 auto; padding:18px 16px}
+    h1{font-size: clamp(20px,2.6vw,30px); margin:0; letter-spacing:.2px}
+    .subtitle{opacity:.8; font-size:14px}
+    .grid{display:grid; gap:16px}
+    @media(min-width:900px){.grid{grid-template-columns:360px 1fr}}
+    .card{background:var(--card); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:16px; box-shadow:0 8px 30px rgba(0,0,0,.22)}
+    .card h2{margin:0 0 10px; font-size:18px}
+    .section-title{display:flex; align-items:center; justify-content:space-between; gap:12px}
+    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+    label{font-size:13px; opacity:.9}
+    input[type="file"]{display:none}
+    .drop{border:1.5px dashed rgba(255,255,255,.18); padding:16px; border-radius:14px; text-align:center; background:rgba(255,255,255,.02)}
+    .drop.drag{border-color:var(--accent); background:rgba(110,168,254,.08)}
+    .btn{appearance:none; border:none; padding:10px 14px; border-radius:12px; background:linear-gradient(180deg,#2a3a7c,#20306b); color:#fff; font-weight:600; cursor:pointer; box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 8px 20px rgba(30,60,160,.25)}
+    .btn.secondary{background:#1b2347; border:1px solid rgba(255,255,255,.1); font-weight:500}
+    .btn.warn{background:#433310; border:1px solid rgba(255,208,86,.5)}
+    .btn:disabled{opacity:.5; cursor:not-allowed}
+    .pill{font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.06)}
+    .switch{display:inline-flex; gap:8px; align-items:center}
+    .switch input{accent-color:var(--accent)}
+    .table-wrap{overflow:auto; border-radius:12px; border:1px solid rgba(255,255,255,.08)}
+    table{width:100%; border-collapse:collapse; min-width:700px; background:#0f1733}
+    th,td{padding:10px 12px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; font-size:13px}
+    th{position:sticky; top:0; background:#0e1530; z-index:1}
+    .muted{color:var(--muted)}
+    .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)}
+    .small{font-size:12px; opacity:.9}
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; background:#0a0f22; border:1px solid rgba(255,255,255,.12); border-radius:6px; padding:1px 6px; font-size:12px}
+    .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:10px; background:#0d1430; border:1px solid rgba(255,255,255,.08)}
+    .footer{opacity:.8; font-size:12px; margin-top:12px}
+    .danger{background:#33121a; border-color:#ff6b6b}
+    .tips{font-size:12px; color:var(--muted)}
+  </style>
+  </head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Duplicate Voter Detector</h1>
+    <div class="subtitle">Upload voter lists (CSV, XLSX, JSON, PDF*) to find duplicate entries. <span class="tips">*PDF support is best‑effort.</span></div>
+  </div>
+</header>
+<main class="wrap grid" id="app">
+  <!-- Left: Controls -->
+  <section class="card">
+    <div class="section-title">
+      <h2>1) Import Files</h2>
+      <button class="btn secondary" id="btn-sample">Load Sample Data</button>
+    </div>
+    <div class="drop" id="drop">
+      <input id="file" type="file" multiple accept=".csv,.tsv,.xlsx,.xls,.ods,.json,.pdf,.txt" />
+      <label for="file" class="btn">Select files</label>
+      <div class="small muted" style="margin-top:8px">Or drag & drop here • Supported: CSV/TSV, XLSX/XLS/ODS, JSON, PDF (best‑effort)</div>
+    </div>
+
+    <div style="height:10px"></div>
+    <h2>2) Match Settings</h2>
+    <div class="row">
+      <div class="chip"><input type="checkbox" class="key" value="voter_id" checked> <label>Voter ID / EPIC No</label></div>
+      <div class="chip"><input type="checkbox" class="key" value="name" checked> <label>Name</label></div>
+      <div class="chip"><input type="checkbox" class="key" value="dob"> <label>DOB</label></div>
+      <div class="chip"><input type="checkbox" class="key" value="father"> <label>Father's Name</label></div>
+      <div class="chip"><input type="checkbox" class="key" value="address"> <label>Address</label></div>
+    </div>
+
+    <div style="height:6px"></div>
+    <div class="row">
+      <span class="pill">Mode:</span>
+      <div class="switch"><input id="mode" type="checkbox"> <label for="mode">Advanced (fuzzy)</label></div>
+      <span class="tips">Simple = exact match on selected keys. Advanced = fuzzy (typos/spacing).
+      </span>
+    </div>
+
+    <div id="adv" style="display:none; margin-top:8px">
+      <div class="row">
+        <label>Similarity threshold (0–1):</label>
+        <input id="threshold" type="number" min="0" max="1" step="0.05" value="0.85" class="pill" style="width:90px">
+        <label class="tips">Higher = stricter</label>
+      </div>
+      <div class="row">
+        <label><input id="scoped" type="checkbox" checked> Compare within same booth/ward (if present)</label>
+      </div>
+    </div>
+    <div style="height:10px"></div>
+    <div class="row">
+      <button class="btn" id="run">Find Duplicates</button>
+      <button class="btn secondary" id="export-dup" disabled>Export Duplicates CSV</button>
+      <button class="btn secondary" id="export-clean" disabled>Export De‑duplicated CSV</button>
+    </div>
+
+    <div class="footer">Tip: After import, review the detected columns (Name, EPIC No, etc.). You can edit cells inline before running.</div>
+  </section>
+
+  <!-- Right: Results -->
+  <section class="card">
+    <div class="section-title">
+      <h2>Data Preview</h2>
+      <span class="pill" id="count">0 rows</span>
+    </div>
+    <div class="table-wrap" id="table-wrap">
+      <table id="table"><thead></thead><tbody></tbody></table>
+    </div>
+
+    <div style="height:12px"></div>
+    <div class="section-title">
+      <h2>Duplicate Groups</h2>
+      <span class="pill" id="dup-count">0 groups</span>
+    </div>
+    <div class="table-wrap" id="dups-wrap">
+      <table id="dups"><thead></thead><tbody></tbody></table>
+    </div>
+
+    <div class="footer">PDF note: We extract text and look for EPIC numbers and names heuristically. For perfect results, convert PDF to CSV/XLSX before importing.</div>
+  </section>
+</main>
+
+<script>
+// --------------------- Utilities ---------------------
+const sleep = (ms)=> new Promise(r=>setTimeout(r,ms));
+const byId = (id)=> document.getElementById(id);
+const headerAliases = {
+  voter_id:["epic","epic no","epic number","voter id","voterid","id","elector's photo identity card"],
+  name:["name","voter name","applicant name","elector name"],
+  father:["father","father's name","guardian","husband","husband's name","guardian name"],
+  dob:["dob","date of birth","d.o.b","birth"],
+  age:["age"],
+  gender:["gender","sex"],
+  address:["address","house","house no","house number","part name","booth address","village","locality"],
+  booth:["booth","part no","part number","ward","section","serial no","sr no","sl no","s no","s.no","ac no","assembly"]
+};
+  const norm = (s)=> (s==null?"":String(s))
+  .replace(/[\n\r\t]+/g,' ')
+  .replace(/\s{2,}/g,' ')
+  .trim();
+const cleanName = (s)=> norm(s).toLowerCase().replace(/[^a-z\s]/g,'').replace(/\s{2,}/g,' ').trim();
+const soundex = (s)=>{ // simple EN soundex for name fuzziness
+  s = (s||'').toUpperCase().replace(/[^A-Z]/g,'');
+  if(!s) return '';
+  const fc=s[0];
+  const map={B:1,F:1,P:1,V:1,C:2,G:2,J:2,K:2,Q:2,S:2,X:2,Z:2,D:3,T:3,L:4,M:5,N:5,R:6};
+  let out='';
+  for(let i=1;i<s.length;i++){
+    const c=s[i]; const code = map[c]||0; const prev = out[out.length-1];
+    if(code && code!=prev) out+=code;
+  }
+  return (fc+out+'000').slice(0,4);
+};
+
+function strSimilarity(a,b){ // normalized Levenshtein similarity
+  a = cleanName(a); b = cleanName(b);
+  if(!a||!b) return 0;
+  const m=a.length, n=b.length;
+  const dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
+  for(let i=0;i<=m;i++) dp[i][0]=i;
+  for(let j=0;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      const cost = a[i-1]==b[j-1]?0:1;
+      dp[i][j]=Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+    }
+  }
+  const dist=dp[m][n];
+  const maxLen=Math.max(m,n);
+  return 1 - dist/maxLen;
+}
+
+const detectCol = (headers, key)=>{
+  const aliases = headerAliases[key];
+  let foundIdx=-1, foundName='';
+  headers.forEach((h,i)=>{
+    const hh=norm(h).toLowerCase();
+    if(aliases.some(a=> hh===a || hh.includes(a))){ foundIdx=i; foundName=h; }
+    if(key==='voter_id' && /[epic]{2,}/i.test(hh)) { foundIdx=i; foundName=h; }
+  });
+  return foundIdx;
+};
+
+function csvToRows(text){
+  const res = Papa.parse(text, {header:true, skipEmptyLines:true});
+  return {headers: res.meta.fields||[], rows: res.data};
+}
+
+function sheetToRows(wb){
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+  const json = XLSX.utils.sheet_to_json(ws, {defval:"", raw:false});
+  const headers = Object.keys(json[0]||{});
+  return {headers, rows: json};
+  }
+  
+// PDF: best-effort text extraction
+async function pdfToRows(arrayBuffer){
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  let text='';
+  for(let p=1;p<=pdf.numPages;p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const strings = content.items.map(i=>i.str);
+    text += strings.join(' ') + '\n';
+  }
+  // Heuristic: find EPIC-like tokens and names near them
+  // Create naive line-based rows
+  const lines = text.split(/\n+/).map(s=>norm(s)).filter(Boolean);
+  const rows=[];
+  for(const line of lines){
+    const epic = (line.match(/[A-Z]{3}[0-9]{7,}/i)||[])[0]||'';
+    let name='';
+    const nameMatch = line.match(/(?:Name|Elector|Voter)\s*[:\-]?\s*([A-Za-z .]+?)(?:,|\bAge\b|\bEPIC\b|$)/i);
+    if(nameMatch) name = nameMatch[1];
+    rows.push({line, EPIC: epic, Name: name});
+  }
+  const headers = ['EPIC','Name','line'];
+  return {headers, rows};
+}
+
+function normalizeRecord(rec){
+  // map to canonical keys
+  const obj={ original: rec };
+  for(const k in rec){ obj[k] = rec[k]; }
+  const lowerKeys = Object.keys(rec).reduce((acc,k)=>{acc[k.toLowerCase()]=k; return acc;},{});
+  const pick = (key, guess)=>{
+    // prefer direct existing canonical
+    if(rec[key]!=null && String(rec[key]).trim()!=='') return rec[key];
+    // else try alias detection
+    if(!guess){
+      for(const alias of headerAliases[key]){
+        const found = lowerKeys[alias]; if(found) return rec[found];
+      }
+    } else {
+      const found = lowerKeys[guess]; if(found) return rec[found];
+    }
+    return '';
+  };
+  const canonical = {
+    voter_id: pick('voter_id') || rec['EPIC'] || rec['epic'] || '',
+    name: pick('name') || rec['Name'] || rec['NAME'] || '',
+    father: pick('father') || '',
+    dob: pick('dob') || '',
+    age: pick('age') || '',
+    gender: pick('gender') || '',
+    address: pick('address') || '',
+    booth: pick('booth') || '',
+  };
+  // normalize some fields
+  canonical.voter_id = norm(String(canonical.voter_id)).toUpperCase();
+  canonical.name = norm(canonical.name);
+  canonical.father = norm(canonical.father);
+  canonical.dob = norm(canonical.dob).replace(/\b(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})\b/, (m,d,mn,y)=>`${d.padStart(2,'0')}-${mn.padStart(2,'0')}-${String(y).padStart(4,'0')}`);
+  canonical.address = norm(canonical.address);
+  canonical.booth = norm(canonical.booth);
+  return canonical;
+}
+  
+function arrayToCSV(arr){
+  if(!arr.length) return '';
+  const headers = Object.keys(arr[0]);
+  const esc = (v)=> '"'+String(v).replace(/"/g,'""')+'"';
+  const rows = arr.map(o=> headers.map(h=> esc(o[h]??'')).join(','));
+  return headers.join(',') + '\n' + rows.join('\n');
+}
+
+// --------------------- State ---------------------
+let dataRows = []; // canonical rows
+let rawHeaders = [];
+
+function setCount(){ byId('count').textContent = `${dataRows.length} rows`; }
+
+function renderTable(){
+  const table = byId('table');
+  const thead = table.querySelector('thead');
+  const tbody = table.querySelector('tbody');
+  thead.innerHTML = '';
+  tbody.innerHTML = '';
+  const headers = ['voter_id','name','father','dob','age','gender','address','booth'];
+  const trh=document.createElement('tr');
+  for(const h of headers){
+    const th=document.createElement('th'); th.textContent=h.toUpperCase(); trh.appendChild(th);
+  }
+  thead.appendChild(trh);
+  const frag=document.createDocumentFragment();
+  dataRows.forEach((r,idx)=>{
+    const tr=document.createElement('tr');
+    headers.forEach(h=>{
+      const td=document.createElement('td'); td.contentEditable=true; td.dataset.idx=idx; td.dataset.key=h; td.textContent=r[h]||''; tr.appendChild(td);
+    });
+    frag.appendChild(tr);
+  });
+  tbody.appendChild(frag);
+}
+
+function hookCellEditing(){
+  byId('table').addEventListener('input', (e)=>{
+    const td=e.target.closest('td'); if(!td) return;
+    const {idx,key}=td.dataset; dataRows[idx][key]=td.textContent.trim();
+  });
+}
+
+// --------------------- Duplicate Detection ---------------------
+function getSelectedKeys(){
+  return Array.from(document.querySelectorAll('.key:checked')).map(i=>i.value);
+  }
+  
+function keySignature(row, keys){
+  const vals = keys.map(k=>{
+    const v=row[k]||'';
+    if(k==='name' || k==='father' || k==='address') return cleanName(v);
+    return norm(v).toLowerCase();
+  });
+  return vals.join('|');
+}
+
+function groupByExact(rows, keys){
+  const map=new Map();
+  rows.forEach((r,i)=>{
+    const sig=keySignature(r,keys);
+    if(!sig) return;
+    if(!map.has(sig)) map.set(sig,[]);
+    map.get(sig).push({i, r});
+  });
+  return Array.from(map.values()).filter(g=>g.length>1);
+}
+
+function groupByFuzzy(rows, keys, {threshold=0.85, scoped=true}={}){
+  const groups=[]; const used=new Set();
+  // optional scoping by booth to cut comparisons
+  const buckets = new Map();
+  rows.forEach((r,idx)=>{
+    const scope = scoped && r.booth ? r.booth : '__all__';
+    if(!buckets.has(scope)) buckets.set(scope,[]);
+    buckets.get(scope).push({i:idx, r});
+  });
+
+  const compareKeys = keys.filter(k=>k!=='voter_id');
+  const useVoterId = keys.includes('voter_id');
+
+  for(const [scope, arr] of buckets){
+    for(let a=0;a<arr.length;a++){
+      if(used.has(arr[a].i)) continue;
+      const seed = arr[a];
+      const group=[seed];
+      for(let b=a+1;b<arr.length;b++){
+        if(used.has(arr[b].i)) continue;
+        const x=arr[b];
+        // If both have VoterID and equal => hard duplicate
+        if(useVoterId && seed.r.voter_id && x.r.voter_id && seed.r.voter_id===x.r.voter_id){
+          group.push(x); continue;
+        }
+        // fuzzy compare over compareKeys (Name, Father, DOB, Address)
+        let scoreSum=0, count=0;
+        for(const k of compareKeys){
+          if(k==='dob'){
+            if(seed.r.dob && x.r.dob && norm(seed.r.dob)===norm(x.r.dob)) { scoreSum+=1; count++; }
+            continue;
+          }
+          const s = strSimilarity(seed.r[k]||'', x.r[k]||'');
+          scoreSum+=s; count++;
+        }
+        if(count===0) continue;
+        const sim = scoreSum/count;
+        // bonus if soundex of names match
+        const sdx = (soundex(seed.r.name) && soundex(seed.r.name)===soundex(x.r.name)) ? 0.05 : 0;
+        if(sim+sdx >= threshold){ group.push(x); }
+      }
+      if(group.length>1){ group.forEach(g=>used.add(g.i)); groups.push(group); }
+    }
+  }
+  return groups;
+}
+
+function renderGroups(groups){
+  const t=byId('dups'); const thead=t.querySelector('thead'); const tbody=t.querySelector('tbody');
+  thead.innerHTML=''; tbody.innerHTML='';
+  const trh=document.createElement('tr');
+  ['Group','Index','VOTER_ID','NAME','FATHER','DOB','ADDRESS','BOOTH'].forEach(h=>{
+    const th=document.createElement('th'); th.textContent=h; trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  const frag=document.createDocumentFragment();
+  groups.forEach((g,gi)=>{
+    g.forEach(item=>{
+      const {i,r}=item; const tr=document.createElement('tr');
+      const cells=[gi+1, i+1, r.voter_id, r.name, r.father, r.dob, r.address, r.booth];
+      cells.forEach(c=>{ const td=document.createElement('td'); td.textContent=c||''; tr.appendChild(td); });
+      frag.appendChild(tr);
+    });
+  });
+  tbody.appendChild(frag);
+  byId('dup-count').textContent = `${groups.length} groups`;
+}
+
+function exportCSV(filename, arr){
+  const csv=arrayToCSV(arr);
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// --------------------- Import Handling ---------------------
+async function handleFiles(files){
+  let total=[];
+  for(const f of files){
+    const ext=(f.name.split('.').pop()||'').toLowerCase();
+    if(['csv','tsv','txt'].includes(ext)){
+      const text = await f.text();
+      const {headers, rows} = csvToRows(text);
+      total = total.concat(rows.map(r=>normalizeRecord(r)));
+    } else if(['xlsx','xls','ods'].includes(ext)){
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, {type:'array'});
+      const {headers, rows} = sheetToRows(wb);
+      total = total.concat(rows.map(r=>normalizeRecord(r)));
+    } else if(ext==='json'){
+      const txt = await f.text();
+      let arr=[]; try{arr=JSON.parse(txt);}catch(e){alert('Invalid JSON array');}
+      if(!Array.isArray(arr)) { alert('JSON must be an array of objects'); }
+      else total = total.concat(arr.map(r=>normalizeRecord(r)));
+    } else if(ext==='pdf'){
+      const buf = await f.arrayBuffer();
+      const {rows} = await pdfToRows(buf);
+      total = total.concat(rows.map(r=>normalizeRecord(r)));
+    } else {
+      console.warn('Unsupported', f.name);
+    }
+  }
+  dataRows = total;
+  setCount();
+  renderTable();
+}
+  
+// --------------------- Events ---------------------
+(function init(){
+  const drop=byId('drop'); const file=byId('file');
+  ;['dragenter','dragover'].forEach(evt=> drop.addEventListener(evt,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');}))
+  ;['dragleave','drop'].forEach(evt=> drop.addEventListener(evt,(e)=>{e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');}))
+  drop.addEventListener('drop', (e)=>{ handleFiles(e.dataTransfer.files); })
+  file.addEventListener('change', (e)=>{ handleFiles(e.target.files); e.target.value=''; })
+
+  byId('mode').addEventListener('change', (e)=>{ byId('adv').style.display = e.target.checked ? 'block':'none'; })
+
+  byId('run').addEventListener('click', ()=>{
+    const keys=getSelectedKeys(); if(keys.length===0){ alert('Select at least one key'); return; }
+    if(!dataRows.length){ alert('Please import files first'); return; }
+
+    // performance guard
+    if(dataRows.length>8000 && byId('mode').checked){
+      if(!confirm('You have '+dataRows.length+' rows. Fuzzy mode can be slow. Continue?')) return;
+    }
+
+    const groups = byId('mode').checked
+      ? groupByFuzzy(dataRows, keys, {threshold: parseFloat(byId('threshold').value||'0.85'), scoped: byId('scoped').checked})
+      : groupByExact(dataRows, keys);
+
+    renderGroups(groups);
+
+    // enable exports
+    byId('export-dup').disabled = groups.length===0;
+    byId('export-clean').disabled = false;
+
+    // prepare duplicate rows for export
+    byId('export-dup').onclick = ()=>{
+      const flat = groups.flat().map(g=> dataRows[g.i]);
+      exportCSV('duplicates.csv', flat);
+    };
+
+    byId('export-clean').onclick = ()=>{
+      // remove duplicates by keeping first occurrence per signature
+      const keysSel=getSelectedKeys(); const seen=new Set(); const out=[];
+      for(const r of dataRows){
+        const sig = byId('mode').checked? null : keySignature(r, keysSel);
+        if(byId('mode').checked){
+          // In fuzzy mode: fall back to exact on voter_id if available, else include
+          const sig2 = r.voter_id ? 'VID:'+r.voter_id : JSON.stringify([cleanName(r.name), r.dob]);
+          if(seen.has(sig2)) continue; seen.add(sig2); out.push(r);
+        } else {
+          if(!sig) { out.push(r); continue; }
+          if(seen.has(sig)) continue; seen.add(sig); out.push(r);
+        }
+      }
+      exportCSV('deduplicated.csv', out);
+    };
+  });
+  
+  byId('btn-sample').addEventListener('click', ()=>{
+    const sample=[
+      {"Voter ID":"ABC1234567","Name":"Ravi Kumar","Father's Name":"Suresh Kumar","DOB":"12/05/1990","Address":"Ward 12, Indira Nagar","Booth":"12"},
+      {"Voter ID":"ABC1234567","Name":"Ravi Kumar","Father's Name":"Suresh Kumar","DOB":"12/05/1990","Address":"Ward 12, Indira Nagar","Booth":"12"},
+      {"EPIC":"XYZ7654321","Name":"Bablu Nath","Father":"Mr. Nath","DOB":"1997-08-14","Address":"Agartala, Tripura","Booth":"18"},
+      {"epic":"XYZ7654321","Name":"Bablu N.","Father":"Mr Nath","DOB":"14-08-1997","Address":"Agartala Tripura","Booth":"18"},
+      {"VoterID":"QQQ1112223","Name":"Asha Devi","Father's Name":"R. Singh","DOB":"10/10/1988","Address":"Ward 5, Rajendra Nagar","Booth":"5"},
+      {"VoterID":"","Name":"Asha Dave","Father's Name":"R Singh","DOB":"1988/10/10","Address":"Ward 5 Rajendra Nagar","Booth":"5"}
+    ];
+    dataRows = sample.map(normalizeRecord);
+    setCount(); renderTable();
+  });
+
+  hookCellEditing();
+})();
+</script>
+</body>
+</html>
