@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Duplicate Voter Detector</title>
+  <style>
+    :root{
+      --bg:#0f172a; --card:#111827; --muted:#1f2937; --text:#e5e7eb; --accent:#22c55e; --warn:#f59e0b; --danger:#ef4444; --soft:#94a3b8;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Inter,Helvetica,Arial,sans-serif;background:linear-gradient(180deg,#0b1220,#0f172a 30%,#111827);color:var(--text)}
+    header{padding:20px 16px;border-bottom:1px solid #223}
+    .wrap{max-width:1100px;margin:0 auto;padding:18px}
+    h1{font-size:clamp(22px,3vw,34px);margin:0 0 6px}
+    p.sub{color:#cbd5e1;margin:0}
+    .card{background:rgba(17,24,39,.7);backdrop-filter: blur(6px);border:1px solid rgba(255,255,255,.06);border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 10px 24px rgba(0,0,0,.25)}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media (min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+    label{display:block;font-weight:600;margin-bottom:6px}
+    input[type="file"], select, input[type="number"], input[type="text"], textarea{
+      width:100%;padding:10px 12px;border-radius:12px;background:var(--muted);border:1px solid #2b3646;color:var(--text)
+    }
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+    button{border:0;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}
+    .btn{background:var(--accent);color:#062b16}
+    .btn-outline{background:transparent;border:1px solid #36536d;color:#cbd5e1}
+    .btn-warn{background:var(--warn);color:#2b1d04}
+    .btn-danger{background:var(--danger);color:#2b0c0c}
+    .actions{display:flex;gap:10px;flex-wrap:wrap}
+    .statbar{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+    .stat{background:#0b1220;border:1px solid #253044;border-radius:14px;padding:12px;text-align:center}
+    .stat .n{font-size:20px;font-weight:900}
+    table{width:100%;border-collapse:collapse}
+    th, td{padding:10px 8px;border-bottom:1px solid #223;text-align:left}
+    th{position:sticky;top:0;background:#0b1220;z-index:1}
+    tr.group-start td{border-top:2px solid #3b82f6}
+    .note{font-size:12px;color:#9aa8bc}
+    .badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid #3a4a63;color:#cbd5e1}
+    .hint{color:#a5b4fc}
+    .footer{font-size:12px;color:#9aa8bc;text-align:center;padding:20px}
+    details{border:1px solid #2b3646;border-radius:12px;padding:10px;background:#0b1220}
+    summary{cursor:pointer;font-weight:700}
+    .chips{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{background:#0b1220;border:1px dashed #32445b;padding:6px 10px;border-radius:999px;font-size:12px}
+    .ok{color:#22c55e}
+    .warn{color:#f59e0b}
+    .danger{color:#ef4444}
+    .scroll{max-height:460px;overflow:auto;border:1px solid #223;border-radius:12px}
+    .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;background:#0b1220;border:1px solid #2b3646;padding:0 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <header class="wrap">
+    <h1>Duplicate Voter Detector</h1>
+    <p class="sub">Detect likely duplicate entries (same person, multiple votes) from a voter list — entirely offline in your browser.</p>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <h2>1) Upload Voter List (CSV)</h2>
+      <p>Expected columns (any order): <span class="chips"><span class="chip">VoterID</span><span class="chip">Name</span><span class="chip">Father/Mother/Spouse</span><span class="chip">DOB</span><span class="chip">Age</span><span class="chip">Gender</span><span class="chip">Address</span><span class="chip">Booth</span></span></p>
+      <div class="grid">
+        <div>
+          <label for="file">Voter list CSV</label>
+          <input id="file" type="file" accept=".csv" />
+        </div>
+        <div>
+          <label>Delimiter</label>
+          <select id="delimiter">
+            <option value="," selected>Comma (,)</option>
+            <option value="\t">Tab (\t)</option>
+            <option value=";">Semicolon (;)</option>
+            <option value="|">Pipe (|)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Header row?</label>
+          <select id="hasHeader">
+            <option value="yes" selected>Yes – first row has column names</option>
+            <option value="no">No – data only</option>
+          </select>
+        </div>
+        <div>
+          <label>Sampling preview</label>
+          <button class="btn-outline" id="previewBtn">Show 20-row preview</button>
+        </div>
+      </div>
+      <p class="note">We never upload your file anywhere; all processing runs locally in your browser.</p>
+    </section>
+
+    <section class="card">
+      <h2>2) Map Columns</h2>
+      <div class="row3">
+        <div>
+          <label>Voter ID column</label>
+          <select id="colVoterId"></select>
+        </div>
+        <div>
+          <label>Name column</label>
+          <select id="colName"></select>
+        </div>
+        <div>
+          <label>Date of Birth column</label>
+          <select id="colDOB"></select>
+        </div>
+      </div>
+      <div class="row3" style="margin-top:10px">
+        <div>
+          <label>Address column</label>
+          <select id="colAddress"></select>
+        </div>
+        <div>
+          <label>Father/Mother/Spouse column (optional)</label>
+          <select id="colGuardian"></select>
+        </div>
+        <div>
+          <label>Booth/Part No. column (optional)</label>
+          <select id="colBooth"></select>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>3) Matching Rules</h2>
+      <div class="grid">
+        <div>
+          <label>Primary match mode</label>
+          <select id="mode">
+            <option value="id">Exact: VoterID duplicates</option>
+            <option value="namedob">Exact: Name + DOB (and optionally Address)</option>
+            <option value="fuzzy">Fuzzy: Name similarity within same Address/Booth</option>
+          </select>
+        </div>
+        <div>
+          <label>When using Name matching, also require Address match?</label>
+          <select id="addrReq">
+            <option value="no" selected>No</option>
+            <option value="yes">Yes</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Normalize names (remove titles, punctuation, extra spaces)</label>
+          <select id="normalizeNames">
+            <option value="yes" selected>Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+        <div>
+          <label>Use Soundex blocking (faster fuzzy grouping)</label>
+          <select id="useSoundex">
+            <option value="yes" selected>Yes</option>
+            <option value="no">No</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label>Fuzzy threshold (Levenshtein 0–1, lower = stricter)</label>
+          <input id="threshold" type="number" step="0.01" min="0" max="1" value="0.2" />
+          <div class="note">0.2 ≈ very similar; try 0.3 for looser matching.</div>
+        </div>
+        <div>
+          <label>Min group size to flag as duplicate</label>
+          <input id="minGroup" type="number" min="2" value="2" />
+        </div>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button class="btn" id="run">Run detection</button>
+        <button class="btn-outline" id="clear">Clear results</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4) Results</h2>
+      <div class="statbar" id="stats">
+        <div class="stat"><div class="n" id="statTotal">0</div><div>Total rows</div></div>
+        <div class="stat"><div class="n" id="statUnique">0</div><div>Unique entities</div></div>
+        <div class="stat"><div class="n" id="statDupGroups">0</div><div>Duplicate groups</div></div>
+        <div class="stat"><div class="n" id="statDupRows">0</div><div>Rows flagged</div></div>
+      </div>
+      <div class="actions" style="margin:12px 0">
+        <button class="btn-warn" id="exportCsv" disabled>Export flagged groups (CSV)</button>
+        <button class="btn-outline" id="exportJson" disabled>Export JSON</button>
+      </div>
+      <details style="margin-bottom:10px">
+        <summary>How are duplicates detected?</summary>
+        <ul>
+          <li><b>Exact ID</b>: any repeated <span class="kbd">VoterID</span>.</li>
+          <li><b>Name + DOB</b>: exact match on normalized <span class="kbd">Name</span> and <span class="kbd">DOB</span>; optionally same Address.</li>
+          <li><b>Fuzzy</b>: group by Soundex (optional) and flag pairs with normalized distance ≤ threshold, within same Address/Booth if provided.</li>
+        </ul>
+        <p class="note">Always review manually. This tool suggests likely duplicates; it does not assert fraud.</p>
+      </details>
+      <div class="scroll">
+        <table id="resultTable">
+          <thead>
+            <tr>
+              <th>Group #</th>
+              <th>Match Score</th>
+              <th>VoterID</th>
+              <th>Name</th>
+              <th>DOB</th>
+              <th>Address</th>
+              <th>Guardian</th>
+              <th>Booth</th>
+              <th>Row #</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Sample CSV Format</h2>
+      <pre class="note">VoterID,Name,DOB,Address,Guardian,Booth
+TR/123/456,Anita Devi,1987-03-12,Agartala Ward 5,Ram Prasad,17
+TR/123/789,Anita Debi,12-03-1987,Agartala Wd-5,Ram Prasad,17
+TR/555/111,Rahul Das,1990/11/01,Belonia Part-3,Shila Das,18
+TR/555/111,Rahul Das,1990-11-01,Belonia Part-3,Shila Das,19</pre>
+    </section>
+
+    <div class="footer">Built for offline review by election teams. © 2025</div>
+  </main>
+
+  <script>
+  // ===== Simple CSV parser (handles quotes) =====
+  function parseCSV(text, delimiter) {
+    const rows = [];
+    let i=0, cur='', inQuotes=false, row=[];
+    const pushCell=()=>{ row.push(cur); cur=''; }
+    const pushRow=()=>{ rows.push(row); row=[]; }
+    while (i < text.length) {
+      const c = text[i];
+      if (inQuotes) {
+        if (c==='"') { if (text[i+1]==='"'){cur+='"'; i++;} else {inQuotes=false;} }
+        else cur+=c;
+      } else {
+        if (c==='"') inQuotes=true;
+        else if (c===delimiter) pushCell();
+        else if (c==='\n') { pushCell(); pushRow(); }
+        else if (c==='\r') { /* skip */ }
+        else cur+=c;
+      }
+      i++;
+    }
+    pushCell(); if (row.length>1 || row[0]!=="") pushRow();
+    return rows.filter(r=>!(r.length===1 && r[0]===''));
+  }
+
+  // ===== Utilities =====
+  const norm = s => (s||'').toString().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9\s]/g,' ').replace(/\b(MR|MRS|MS|SHRI|SMT|MD|DR|SRI|KM|KUMARI|KUM)\b/g,'').replace(/\s+/g,' ').trim();
+  const normLoose = s => (s||'').toString().toUpperCase().replace(/\s+/g,' ').trim();
+  const normAddr = s => normLoose(s).replace(/WARD|WD|PART|PRT|P\b/g,'').replace(/\s+/g,' ').trim();
+
+  function soundex(s){
+    s = (s||'').toUpperCase().replace(/[^A-Z]/g,''); if(!s) return '';
+    const map = {B:1,F:1,P:1,V:1,C:2,G:2,J:2,K:2,Q:2,S:2,X:2,Z:2,D:3,T:3,L:4,M:5,N:5,R:6};
+    const first = s[0];
+    let out = first, prev = map[first]||'';
+    for(let i=1;i<s.length;i++){
+      const code = map[s[i]]||'';
+      if(code!==prev && code!=='') out+=code;
+      if(out.length===4) break; prev=code;
+    }
+    return (out+'000').slice(0,4);
+  }
+
+  function levenshtein(a,b){
+    a=a||''; b=b||''; const m=a.length,n=b.length; if(!m) return n; if(!n) return m;
+    const dp=new Array(n+1); for(let j=0;j<=n;j++) dp[j]=j;
+    for(let i=1;i<=m;i++){
+      let prev=dp[0]; dp[0]=i; for(let j=1;j<=n;j++){
+        const tmp=dp[j];
+        dp[j]=Math.min(
+          dp[j]+1,
+          dp[j-1]+1,
+          prev + (a[i-1]===b[j-1]?0:1)
+        );
+        prev=tmp;
+      }
+    }
+    return dp[n];
+  }
+  const simRatio = (a,b)=>{ const d=levenshtein(a,b); const L=Math.max(a.length,b.length)||1; return d/L; } // 0=exact; 1=very different
+
+  // ===== State =====
+  let rawRows = [], headers = [], hasHeader=true;
+  let mapped = {id:null,name:null,dob:null,address:null,guardian:null,booth:null};
+  let results = [];
+
+  // ===== DOM =====
+  const el = id=>document.getElementById(id);
+  const fileEl=el('file'), delimEl=el('delimiter'), hasHeaderEl=el('hasHeader');
+  const colEls=[el('colVoterId'),el('colName'),el('colDOB'),el('colAddress'),el('colGuardian'),el('colBooth')];
+  const modeEl=el('mode'), addrReqEl=el('addrReq'), normalizeEl=el('normalizeNames'), soundexEl=el('useSoundex');
+  const thresholdEl=el('threshold'), minGroupEl=el('minGroup');
+  const statTotal=el('statTotal'), statUnique=el('statUnique'), statDupGroups=el('statDupGroups'), statDupRows=el('statDupRows');
+  const tbody=el('tbody');
+
+  function loadColumns() {
+    const cols = headers.length? headers : rawRows[0]?.map((_,i)=>`Column ${i+1}`) || [];
+    colEls.forEach(sel=>{ sel.innerHTML='<option value="">-- none --</option>' + cols.map((c,i)=>`<option value="${i}">${c}</option>`).join(''); });
+    // Best-guess mapping
+    const guess = (name, regex) => {
+      const i = cols.findIndex(c=>regex.test(c.toUpperCase()));
+      return i>=0? i : '';
+    }
+    el('colVoterId').value = guess('VoterID',/(VOTER|EPIC|ID)/);
+    el('colName').value = guess('Name',/(NAME)/);
+    el('colDOB').value = guess('DOB',/(DOB|BIRTH|D\.O\.B|DATE)/);
+    el('colAddress').value = guess('Address',/(ADDR|ADDRESS|HOUSE|VILL|WARD|PART|PO|PS)/);
+    el('colGuardian').value = guess('Guardian',/(FATHER|MOTHER|SPOUSE|GUARD)/);
+    el('colBooth').value = guess('Booth',/(BOOTH|PART|P\b|SECTION)/);
+  }
+
+  function readFile(file){
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const text=e.target.result; const rows = parseCSV(text, delimEl.value);
+      hasHeader = hasHeaderEl.value==='yes';
+      if (hasHeader) { headers = rows[0]; rawRows = rows.slice(1); }
+      else { headers = []; rawRows = rows; }
+      loadColumns();
+      updateStats();
+    };
+    reader.readAsText(file);
+  }
+
+  fileEl.addEventListener('change', ()=>{
+    const f=fileEl.files[0]; if(!f) return; readFile(f);
+  });
+
+  el('previewBtn').addEventListener('click', ()=>{
+    if (!rawRows.length) { alert('Load a CSV first.'); return; }
+    const sample = rawRows.slice(0,20);
+    alert(sample.map(r=>r.join(', ')).join('\n'));
+  });
+
+  function getMappedRow(r){
+    const idx = i=>{ const v=parseInt(i,10); return Number.isFinite(v)? v : null };
+    const id = idx(el('colVoterId').value), name = idx(el('colName').value), dob = idx(el('colDOB').value);
+    const address = idx(el('colAddress').value), guardian = idx(el('colGuardian').value), booth = idx(el('colBooth').value);
+    return {
+      id: id!=null ? r[id] : '',
+      name: name!=null ? r[name] : '',
+      dob: dob!=null ? r[dob] : '',
+      address: address!=null ? r[address] : '',
+      guardian: guardian!=null ? r[guardian] : '',
+      booth: booth!=null ? r[booth] : ''
+    };
+  }
+
+  function keyExactID(row){ return normLoose(row.id); }
+  function keyNameDOB(row){
+    const n = (normalizeEl.value==='yes'? norm(row.name) : normLoose(row.name));
+    const d = normLoose(row.dob).replace(/[./]/g,'-');
+    const aReq = addrReqEl.value==='yes';
+    const a = aReq ? ('|' + normAddr(row.address)) : '';
+    return n+'|'+d+a;
+  }
+
+  function blockKey(row){
+    const base = (normalizeEl.value==='yes'? norm(row.name) : normLoose(row.name));
+    return soundexEl.value==='yes' ? soundex(base) : base.split(' ')[0];
+  }
+
+  function runExact(groups, rows){
+    const map = new Map();
+    for (let i=0;i<rows.length;i++){
+      const r = getMappedRow(rows[i]);
+      const key = (modeEl.value==='id') ? keyExactID(r) : keyNameDOB(r);
+      if(!map.has(key)) map.set(key,[]);
+      map.get(key).push({r, i, score:0});
+    }
+    for (const [key, arr] of map){ if (arr.length >= parseInt(minGroupEl.value,10)) groups.push(arr); }
+  }
+
+  function runFuzzy(groups, rows){
+    // Block by soundex or first token to reduce comparisons
+    const blocks = new Map();
+    for (let i=0;i<rows.length;i++){
+      const r = getMappedRow(rows[i]);
+      const blk = blockKey(r);
+      if(!blocks.has(blk)) blocks.set(blk, []);
+      blocks.get(blk).push({r,i});
+    }
+    const thr = parseFloat(thresholdEl.value||'0.2');
+    const needSameAddr = addrReqEl.value==='yes';
+    const groupsRaw = [];
+
+    for (const [bk, arr] of blocks){
+      // Compare all pairs in block
+      const used = new Array(arr.length).fill(false);
+      for (let a=0;a<arr.length;a++){
+        if (used[a]) continue;
+        const ra = arr[a].r;
+        const na = (normalizeEl.value==='yes'? norm(ra.name) : normLoose(ra.name));
+        const aa = normAddr(ra.address);
+        const group = [{r:ra, i:arr[a].i, score:0}];
+        for (let b=a+1;b<arr.length;b++){
+          const rb = arr[b].r;
+          if (needSameAddr && normAddr(rb.address)!==aa) continue;
+          const nb = (normalizeEl.value==='yes'? norm(rb.name) : normLoose(rb.name));
+          const ratio = simRatio(na, nb);
+          if (ratio <= thr){
+            used[b]=true; group.push({r:rb, i:arr[b].i, score:ratio});
+          }
+        }
+        if (group.length >= parseInt(minGroupEl.value,10)) groupsRaw.push(group);
+      }
+    }
+    groups.push(...groupsRaw);
+  }
+
+  function updateStats(){
+    statTotal.textContent = rawRows.length;
+  }
+
+  function render(groups){
+    tbody.innerHTML='';
+    let dupRows=0;
+    groups.sort((a,b)=>a[0].i-b[0].i);
+    groups.forEach((g,gi)=>{
+      g.forEach((x,idx)=>{
+        const tr=document.createElement('tr'); if(idx===0) tr.classList.add('group-start');
+        tr.innerHTML = `
+          <td>${gi+1}</td>
+          <td>${x.score?.toFixed? x.score.toFixed(2): x.score}</td>
+          <td>${escapeHtml(x.r.id)}</td>
+          <td>${escapeHtml(x.r.name)}</td>
+          <td>${escapeHtml(x.r.dob)}</td>
+          <td>${escapeHtml(x.r.address)}</td>
+          <td>${escapeHtml(x.r.guardian)}</td>
+          <td>${escapeHtml(x.r.booth)}</td>
+          <td>${x.i+1 + (hasHeader?1:0)}</td>`;
+        tbody.appendChild(tr);
+      });
+      dupRows += g.length;
+    });
+    statDupGroups.textContent = groups.length;
+    statDupRows.textContent = dupRows;
+    statUnique.textContent = Math.max(0, rawRows.length - dupRows);
+    el('exportCsv').disabled = groups.length===0;
+    el('exportJson').disabled = groups.length===0;
+    results = groups;
+  }
+
+  function escapeHtml(s){
+    return (s||'').toString().replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+  }
+
+  function exportCSV(){
+    const lines = [["Group","Score","VoterID","Name","DOB","Address","Guardian","Booth","Row" ]];
+    results.forEach((g,gi)=>{
+      g.forEach(x=>{
+        lines.push([gi+1, (x.score?.toFixed? x.score.toFixed(2): x.score), x.r.id, x.r.name, x.r.dob, x.r.address, x.r.guardian, x.r.booth, x.i+1 + (hasHeader?1:0)]);
+      });
+    });
+    const csv = lines.map(r=>r.map(v=>`"${(v||'').toString().replaceAll('"','""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='duplicate_voters.csv'; a.click(); URL.revokeObjectURL(url);
+  }
+
+  function exportJSON(){
+    const out = results.map((g,gi)=>({group:gi+1, members:g.map(x=>({score:x.score, ...x.r, row:x.i+1 + (hasHeader?1:0)}))}));
+    const blob = new Blob([JSON.stringify(out,null,2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download='duplicate_voters.json'; a.click(); URL.revokeObjectURL(url);
+  }
+
+  el('exportCsv').addEventListener('click', exportCSV);
+  el('exportJson').addEventListener('click', exportJSON);
+
+  el('clear').addEventListener('click', ()=>{
+    tbody.innerHTML='';
+    statDupGroups.textContent = '0';
+    statDupRows.textContent = '0';
+    statUnique.textContent = rawRows.length;
+    results=[]; el('exportCsv').disabled=true; el('exportJson').disabled=true;
+  });
+
+  el('run').addEventListener('click', ()=>{
+    if (!rawRows.length) { alert('Please upload a CSV first.'); return; }
+    // Validate mappings
+    const needName = modeEl.value!=='id';
+    if (modeEl.value==='id' && !el('colVoterId').value){ alert('Select Voter ID column.'); return; }
+    if (needName && !el('colName').value){ alert('Select Name column.'); return; }
+    if (modeEl.value==='namedob' && !el('colDOB').value){ alert('Select DOB column for Name + DOB mode.'); return; }
+
+    const groups=[];
+    if (modeEl.value==='id' || modeEl.value==='namedob') runExact(groups, rawRows);
+    else runFuzzy(groups, rawRows);
+    render(groups);
+  });
+  </script>
+</body>
+</html>
